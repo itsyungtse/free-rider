@@ -1,0 +1,14 @@
+{
+  "name": "free-rider",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "Drive Claude Code on your Mac from a Telegram chat — no API key",
+  "main": "index.js",
+  "scripts": {
+    "start": "node --env-file=.env index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

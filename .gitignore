@@ -1,0 +1,19 @@
+# dependencies
+node_modules/
+
+# secrets / environment  (NEVER commit the bot token)
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# runtime / session state
+*.pid
+.session/
+
+# macOS
+.DS_Store

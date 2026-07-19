@@ -1,0 +1,37 @@
+{
+  "compilerOptions": {
+    // --- Environment ---------------------------------------------------------
+    // Node runs the .ts directly via native type-stripping (>=22.18 / >=23.6),
+    // so nothing is emitted — tsc is used only to type-check.
+    "target": "esnext",
+    "lib": ["esnext"],
+    "types": ["node"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+
+    // --- No build step -------------------------------------------------------
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    // Node's stripper only handles syntax that erases to nothing (no enums,
+    // no `namespace`, no constructor-parameter properties) — flag the rest.
+    "erasableSyntaxOnly": true,
+    // Imports/exports must be unambiguous for the stripper (use `import type`).
+    "verbatimModuleSyntax": true,
+
+    // --- Strictness ----------------------------------------------------------
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+
+    // --- Interop -------------------------------------------------------------
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "moduleDetection": "force"
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
+}

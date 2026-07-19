@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { dirname } from "path";
+import { fileURLToPath } from "url";
 
 // --- Telegram API shapes (only the fields this bot reads) ------------------
 interface TgApiResponse<T = unknown> {
@@ -28,6 +30,8 @@ interface ClaudeResult {
   error?: string | null;
 }
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const ALLOWED_USER_ID = (process.env.ALLOWED_USER_ID || "").trim();
 const WORK_DIR = (process.env.WORK_DIR || "").trim() || __dirname;

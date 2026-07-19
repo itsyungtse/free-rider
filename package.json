@@ -6,7 +6,7 @@
   "description": "Drive Claude Code on your Mac from a Telegram chat — no API key",
   "main": "index.ts",
   "scripts": {
-    "start": "node --env-file=.env index.ts",
+    "dev": "node --env-file=.env index.ts",
     "typecheck": "tsc --noEmit"
   },
   "engines": {

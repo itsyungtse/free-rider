@@ -14,7 +14,7 @@ An OpenClaw-style "AI that does things", but powered by your local Claude Code
 
 - **No API key.** The bot shells out to a local `claude -p` session, which
   authenticates with your existing Claude Code login.
-- **No exposed port.** The Mac connects *out* to Telegram; nothing inbound is
+- **No exposed port.** The Mac connects _out_ to Telegram; nothing inbound is
   opened, so there's no public attack surface to lock down.
 
 ## Security
@@ -27,3 +27,7 @@ An OpenClaw-style "AI that does things", but powered by your local Claude Code
 ## Status
 
 Scaffolding. Bot source is added after Telegram setup.
+
+## TODO
+
+- [ ] command allowlist

@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { dirname } from "path";
-import { fileURLToPath } from "url";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { relative, resolve, sep } from "node:path";
 
 // --- Telegram API shapes (only the fields this bot reads) ------------------
 interface TgApiResponse<T = unknown> {
@@ -30,11 +30,11 @@ interface ClaudeResult {
   error?: string | null;
 }
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const ALLOWED_USER_ID = (process.env.ALLOWED_USER_ID || "").trim();
-const WORK_DIR = (process.env.WORK_DIR || "").trim() || __dirname;
+// Parent directory holding every project Claude may work in. Each chat locks
+// onto one subdirectory via /cd; messages then run inside that project's dir.
+const PROJECTS_ROOT = resolve((process.env.PROJECTS_ROOT || "").trim());
 const PERMISSION_MODE = (process.env.PERMISSION_MODE || "acceptEdits").trim();
 
 if (!BOT_TOKEN) {
@@ -48,8 +48,36 @@ const API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 const sessions = new Map<number, string>();
 // chatIds currently running a claude process (one at a time per chat)
 const busy = new Set<number>();
+// chatId -> absolute cwd Claude runs in (a subdir of PROJECTS_ROOT). Unset means
+// PROJECTS_ROOT itself, until the user picks a project with /cd.
+const activeProject = new Map<number, string>();
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+const cwdFor = (chatId: number) => activeProject.get(chatId) || PROJECTS_ROOT;
+const projectLabel = (dir: string) => relative(PROJECTS_ROOT, dir) || "(root)";
+
+// Direct subdirectories of PROJECTS_ROOT, dotfolders skipped.
+function listProjects(): string[] {
+  try {
+    return readdirSync(PROJECTS_ROOT, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && !d.name.startsWith("."))
+      .map((d) => d.name)
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+// Resolve a user-supplied name to an absolute dir, refusing anything that
+// escapes PROJECTS_ROOT ("../", absolute paths) or isn't a real directory.
+function resolveProjectDir(name: string): string | null {
+  const target = resolve(PROJECTS_ROOT, name);
+  const inside = target === PROJECTS_ROOT || target.startsWith(PROJECTS_ROOT + sep);
+  if (!inside) return null;
+  if (!existsSync(target) || !statSync(target).isDirectory()) return null;
+  return target;
+}
 
 async function tg<T = unknown>(
   method: string,
@@ -71,33 +99,33 @@ async function sendMessage(chatId: number, text: string) {
   }
 }
 
-function runClaude(prompt: string, sessionId?: string): Promise<ClaudeResult> {
-  return new Promise<ClaudeResult>((resolve) => {
+function runClaude(prompt: string, cwd: string, sessionId?: string): Promise<ClaudeResult> {
+  return new Promise<ClaudeResult>((done) => {
     const args = ["-p", prompt, "--output-format", "json", "--permission-mode", PERMISSION_MODE];
     if (sessionId) args.push("--resume", sessionId);
 
-    const child = spawn("claude", args, { cwd: WORK_DIR, env: process.env });
+    const child = spawn("claude", args, { cwd, env: process.env });
     let out = "";
     let err = "";
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (err += d));
 
-    child.on("error", (e) => resolve({ ok: false, error: `spawn failed: ${e.message}` }));
+    child.on("error", (e) => done({ ok: false, error: `spawn failed: ${e.message}` }));
     child.on("close", (code) => {
       if (code !== 0) {
-        resolve({ ok: false, error: err.trim() || `claude exited with code ${code}` });
+        done({ ok: false, error: err.trim() || `claude exited with code ${code}` });
         return;
       }
       try {
         const json = JSON.parse(out);
-        resolve({
+        done({
           ok: !json.is_error,
           result: json.result,
           sessionId: json.session_id,
           error: json.is_error ? json.result : null,
         });
       } catch (e) {
-        resolve({
+        done({
           ok: false,
           error: `could not parse claude output: ${
             e instanceof Error ? e.message : String(e)
@@ -133,22 +161,66 @@ async function handleUpdate(update: TgUpdate) {
   }
 
   // --- built-in commands ---------------------------------------------------
-  if (text === "/start") {
+  const [cmd, ...cmdRest] = text.split(/\s+/);
+  const cmdArg = cmdRest.join(" ").trim();
+
+  if (cmd === "/start") {
     await sendMessage(
       chatId,
-      "free-rider ready 🚀\nSend a message and Claude Code will act on it in:\n" + WORK_DIR,
+      "free-rider ready 🚀\n" +
+        `Projects root:\n${PROJECTS_ROOT}\n\n` +
+        "• /projects — list projects\n" +
+        "• /cd <name> — switch project (resets the conversation)\n" +
+        "• /pwd — show current project\n" +
+        "• /reset — start a fresh conversation",
     );
     return;
   }
-  if (text === "/reset") {
+  if (cmd === "/projects" || cmd === "/ls") {
+    const projects = listProjects();
+    const current = projectLabel(cwdFor(chatId));
+    await sendMessage(
+      chatId,
+      (projects.length
+        ? "📂 Projects:\n" + projects.map((p) => (p === current ? `• ${p} ◄` : `• ${p}`)).join("\n")
+        : `No subdirectories found in ${PROJECTS_ROOT}`) + `\n\nCurrent: ${current}`,
+    );
+    return;
+  }
+  if (cmd === "/cd") {
+    if (!cmdArg) {
+      await sendMessage(
+        chatId,
+        `📍 Current: ${projectLabel(cwdFor(chatId))}\nUsage: /cd <project>`,
+      );
+      return;
+    }
+    const dir = resolveProjectDir(cmdArg);
+    if (!dir) {
+      await sendMessage(chatId, `⚠️ No such project under root: ${cmdArg}\nTry /projects to list.`);
+      return;
+    }
+    activeProject.set(chatId, dir);
+    sessions.delete(chatId);
+    await sendMessage(chatId, `✅ Switched to ${projectLabel(dir)} — conversation reset.`);
+    return;
+  }
+  if (cmd === "/pwd") {
+    await sendMessage(chatId, `📍 ${projectLabel(cwdFor(chatId))}\n${cwdFor(chatId)}`);
+    return;
+  }
+  if (cmd === "/reset") {
     sessions.delete(chatId);
     await sendMessage(chatId, "🧹 Conversation reset — next message starts fresh.");
     return;
   }
-  if (text === "/whoami") {
+  if (cmd === "/whoami") {
     await sendMessage(
       chatId,
-      `user id: ${fromId}\nwork dir: ${WORK_DIR}\npermission: ${PERMISSION_MODE}`,
+      `user id: ${fromId}\n` +
+        `root: ${PROJECTS_ROOT}\n` +
+        `project: ${projectLabel(cwdFor(chatId))}\n` +
+        `permission: ${PERMISSION_MODE}`,
     );
     return;
   }
@@ -161,7 +233,7 @@ async function handleUpdate(update: TgUpdate) {
   busy.add(chatId);
   await tg("sendChatAction", { chat_id: chatId, action: "typing" });
 
-  const r = await runClaude(text, sessions.get(chatId));
+  const r = await runClaude(text, cwdFor(chatId), sessions.get(chatId));
   busy.delete(chatId);
 
   if (r.ok) {
@@ -173,7 +245,7 @@ async function handleUpdate(update: TgUpdate) {
 }
 
 async function main() {
-  console.log(`[start] free-rider — cwd=${WORK_DIR} permission=${PERMISSION_MODE}`);
+  console.log(`[start] free-rider — root=${PROJECTS_ROOT} permission=${PERMISSION_MODE}`);
 
   const me = await tg<{ username: string }>("getMe");
   if (!me.ok) {

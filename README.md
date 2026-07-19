@@ -31,3 +31,4 @@ Scaffolding. Bot source is added after Telegram setup.
 ## TODO
 
 - [ ] command allowlist
+- [ ] dockerize
